@@ -19,6 +19,7 @@ FEATURE_COLS = [
     "corr_sleep_glucose_m1", "corr_steps_glucose_m1", "corr_carbs_glucose_m1",
 ]
 
+# Hitung korelasi Pearson dengan fallback 0.0 jika data tidak valid/konstan.
 def safe_corr(x, y):
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -26,6 +27,7 @@ def safe_corr(x, y):
         return 0.0
     return float(pearsonr(x, y)[0])
 
+# Ubah 30 data harian pertama menjadi 1 baris fitur agregat untuk model.
 def aggregate_first_30_days(df: pd.DataFrame) -> pd.DataFrame:
     required = [
         "day_idx", "glucose_mean", "steps", "sleep_hours", "carbs_g",
@@ -97,6 +99,7 @@ app = FastAPI(
 )
 
 @app.on_event("startup")
+# Muat artifact model sekali saat aplikasi mulai berjalan.
 def load_artifacts():
     global artifacts
     if not MODEL_PATH.exists():
@@ -104,10 +107,12 @@ def load_artifacts():
     artifacts = joblib.load(MODEL_PATH)
 
 @app.get("/")
+# Endpoint sederhana untuk memastikan service aktif.
 def root():
     return {"message": "Glucare 90-day final assessment API is running"}
 
 @app.get("/health")
+# Endpoint health check beserta metadata model yang termuat.
 def health():
     return {
         "status": "ok",
@@ -116,6 +121,7 @@ def health():
     }
 
 @app.post("/predict")
+# Validasi input, lakukan feature engineering 30 hari, lalu jalankan inferensi model.
 def predict(req: PredictRequest):
     try:
         df = pd.DataFrame([r.model_dump() for r in req.records])

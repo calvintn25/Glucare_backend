@@ -1,27 +1,31 @@
-# Glucare 90-Day Final Assessment API
+# Glucare Day-30 Early Warning API
 
-Lightweight FastAPI service for predicting final patient status after a 90-day monitoring period.
+FastAPI backend that predicts day-90 outcome risk using the first 30 days of patient monitoring data.
 
 ## Description
 
-This repository contains a small API that loads a serialized model artifact and exposes a `/predict` endpoint to classify patients' final status as either `Membaik` (improved) or `Memburuk/Stagnan` (worse/stagnant).
+This API receives daily records (day 0 to day 29), performs feature engineering in the backend, and runs a trained model to produce:
 
-The API expects a JSON payload with aggregated patient features (glucose statistics, steps, sleep, and derived correlations) and returns a predicted label and probabilities (when available).
+- Predicted class and status label
+- Early warning risk label (`HIGH_RISK_DAY90` or `LOW_RISK_DAY90`)
+- Probabilities for `membaik` and `memburuk/stagnan`
+- The engineered features used for inference
 
 ## Features
 
-- Load model artifact: `final_assessment_artifact.pkl`
-- Predict endpoint: `POST /predict`
-- Minimal, dependency-light FastAPI app implemented in `main.py`
+- Model artifact loading from `model_final_assessment.pkl`
+- Health check endpoint: `GET /health`
+- Prediction endpoint: `POST /predict`
+- Automatic first-30-days feature aggregation inside `main.py`
 
 ## Requirements
 
 - Python 3.8+
-- See `requirements.txt` for exact package versions.
+- Dependencies listed in `requirements.txt`
 
 ## Installation
 
-1. Create and activate a virtual environment (Windows example):
+1. Create and activate virtual environment (Windows example):
 
 ```powershell
 python -m venv .venv
@@ -29,90 +33,151 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-2. Ensure the trained artifact `final_assessment_artifact.pkl` is placed in the project root. The app expects this file and loads two keys from it: `model` and `feature_cols`.
+2. Put the trained artifact file `model_final_assessment.pkl` in the project root.
 
-## Running the API
+Minimum required artifact keys:
 
-Start the app with uvicorn (development):
+- `model` (required)
+- `feature_cols` (recommended)
+
+Optional keys used by the API response:
+
+- `model_name`
+- `label_map`
+- `scaler`
+
+## Run the API
 
 ```bash
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-By default the interactive docs will be available at `http://localhost:8000/docs`.
+Swagger docs: `http://localhost:8000/docs`
 
-## API Usage
+## Endpoints
 
-POST /predict
+### `GET /`
 
-- Content-Type: `application/json`
-- Body: JSON object with the following numeric features:
+Returns a simple service message.
 
+### `GET /health`
+
+Returns model metadata:
+
+- `status`
+- `model_name`
+- `feature_count`
+
+### `POST /predict`
+
+Request body schema:
+
+```json
+{
+  "patient_id": "P001",
+  "records": [
+    {
+      "day_idx": 0,
+      "glucose_mean": 120.5,
+      "steps": 4500,
+      "sleep_hours": 6.8,
+      "carbs_g": 180,
+      "target_sleep_met": 1,
+      "target_steps_met": 0,
+      "streak": 3,
+      "baseline_glucose": 130
+    }
+  ]
+}
 ```
-glucose_month1_mean
-glucose_month1_std
-glucose_slope_month1
-baseline_glucose
-steps_month1_mean
-steps_consistency_90d
-sleep_month1_mean
-sleep_consistency_90d
-carbs_month1_mean
-sleep_adherence_m1
-steps_adherence_m1
-max_streak
-m1
-corr_steps_glucose
-corr_carbs_glucose
-```
 
-Example curl request:
+Notes:
+
+- `records` must contain at least 30 rows.
+- `day_idx` is validated in range `0..29`.
+- The API uses the first 30 records after sorting by `day_idx`.
+
+Example request (PowerShell-friendly body shortened for readability):
 
 ```bash
 curl -X POST "http://localhost:8000/predict" \
   -H "Content-Type: application/json" \
   -d '{
-    "glucose_month1_mean": 110.5,
-    "glucose_month1_std": 12.3,
-    "glucose_slope_month1": -0.5,
-    "baseline_glucose": 115.0,
-    "steps_month1_mean": 4500,
-    "steps_consistency_90d": 0.72,
-    "sleep_month1_mean": 6.8,
-    "sleep_consistency_90d": 0.85,
-    "carbs_month1_mean": 180.0,
-    "sleep_adherence_m1": 0.9,
-    "steps_adherence_m1": 0.8,
-    "max_streak": 14,
-    "m1": 1.0,
-    "corr_steps_glucose": -0.15,
-    "corr_carbs_glucose": 0.12
+    "patient_id": "P001",
+    "records": [
+      {
+        "day_idx": 0,
+        "glucose_mean": 120.5,
+        "steps": 4500,
+        "sleep_hours": 6.8,
+        "carbs_g": 180,
+        "target_sleep_met": 1,
+        "target_steps_met": 0,
+        "streak": 3,
+        "baseline_glucose": 130
+      }
+    ]
   }'
 ```
 
-Sample successful response:
+Sample response:
 
 ```json
 {
-  "status": "Membaik",
-  "raw_prediction": 1,
-  "probabilities": {
-    "prob_memburuk_stagnan": 0.12,
-    "prob_membaik": 0.88
+  "patient_id": "P001",
+  "model_name": "final_assessment_v1",
+  "prediction_day": 30,
+  "predicted_class": 1,
+  "predicted_status": "Membaik",
+  "early_warning_risk": "LOW_RISK_DAY90",
+  "probability_membaik": 0.8821,
+  "probability_memburuk_stagnan": 0.1179,
+  "features_used": {
+    "glucose_month1_mean": 118.42,
+    "glucose_month1_std": 10.31,
+    "glucose_slope_month1": -0.22,
+    "baseline_glucose": 130.0,
+    "steps_month1_mean": 5123.0,
+    "steps_consistency_m1": 0.0031,
+    "sleep_month1_mean": 6.95,
+    "sleep_consistency_m1": 0.61,
+    "carbs_month1_mean": 172.0,
+    "sleep_adherence_m1": 0.8,
+    "steps_adherence_m1": 0.63,
+    "max_streak_m1": 9.0,
+    "corr_sleep_glucose_m1": -0.12,
+    "corr_steps_glucose_m1": -0.2,
+    "corr_carbs_glucose_m1": 0.11
   }
 }
 ```
 
-## Artifact creation / Notes
+## Inference Pipeline
 
-- The server expects `final_assessment_artifact.pkl` to be a joblib dump containing at least two keys: `model` (a scikit-learn-like estimator) and `feature_cols` (list of column names in the model input order).
-- If you trained the model elsewhere (e.g., Colab), ensure the artifact is saved with `joblib.dump({"model": clf, "feature_cols": feature_cols}, "final_assessment_artifact.pkl")`.
-- The repository contains a small compatibility shim at the top of `main.py` to allow artifacts created on POSIX paths to work on Windows.
+On each `/predict` call, the API:
 
-## Contributing
+1. Validates request schema with Pydantic.
+2. Converts records to DataFrame.
+3. Builds month-1 aggregated features:
+   - central tendency/dispersion (`mean`, `std`)
+   - trend (`linregress` slope)
+   - adherence ratios
+   - max streak
+   - Pearson correlations (safe fallback to `0.0`)
+4. Applies scaler if provided in artifact.
+5. Runs model prediction and probabilities.
 
-Feel free to open issues or create pull requests for improvements. Keep changes small and focused.
+## Error Behavior
+
+- `400 Bad Request` for invalid input, missing required columns, or fewer than 30 daily rows.
+- `500 Internal Server Error` for model/artifact inference failures.
+
+## Project Files
+
+- `main.py`: FastAPI app, feature engineering, model inference
+- `requirements.txt`: Python dependencies
+- `model_final_assessment.pkl`: model artifact loaded at startup
 
 ## License
 
-Choose and add a license file if you plan to open-source this project.
+Add a license file if this project will be distributed publicly.
